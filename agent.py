@@ -71,17 +71,21 @@ def main(name, test = False, chkpt = None, device = 'cpu'):
 
     memory_size = 100000 # pamięć gry
     min_rb_size = 20000
-    sample_size = 100 #batch size <----
+    sample_size = 128 #batch size <----
     lr = 0.0001
 
     eps_min = 0.01
     eps_decay = 0.999999
 
-    env_steps_before_train = 100 # srodowisko wykonuje tyle stepów przed trenowaniem
-    tgt_model_update = 500
+    env_steps_before_train = 16 # srodowisko wykonuje tyle stepów przed trenowaniem
+    tgt_model_update =20
 
     env = gym.make("Breakout-v0")
     env = FrameStackingAndResizingEnv(env, 84, 84, 4)
+
+    test_env = gym.make("Breakout-v0")
+    test_env = FrameStackingAndResizingEnv(test_env, 84, 84, 4)
+
     last_observation = env.reset()
 
     m = ConvModel(env.observation_space.shape, env.action_space.n, lr=lr).to(device) #stworzenie modelu sieci trenujacej -> odpalenie go na gpu
@@ -117,7 +121,6 @@ def main(name, test = False, chkpt = None, device = 'cpu'):
 
             observation, reward, done, info = env.step(action)
             rolling_reward += reward
-            reward = reward*0.1
 
             rb.insert(Sarsd(last_observation, action, reward, observation, done))
             last_observation = observation
@@ -141,6 +144,8 @@ def main(name, test = False, chkpt = None, device = 'cpu'):
                 if epochs_since_tgt > tgt_model_update:
                     print('updating tgt model')
                     update_tgt_model(m, tgt)
+                    rew, frames = run_test_episode(m, test_env, device)
+                    wandb.log({'test_reward': rew, 'test_video': wandb.Video(frames.transpose(0, 3, 2, 1), str(rew), fps=25)})
                     epochs_since_tgt = 0
                     torch.save(tgt.state_dict(), f"/home/karol/Dokumenty/Magisterka badania/cartpole_test/trained_models/{step_num}.pth")
                 steps_since_train = 0
@@ -148,6 +153,24 @@ def main(name, test = False, chkpt = None, device = 'cpu'):
         pass
 
     env.close()
+
+def run_test_episode(model, env, device,  max_steps=1000):
+    frames = []
+    obs = env.reset()
+    frames.append(env.frame)
+
+    idx = 0
+    done = False
+    reward = 0
+
+    while not done and idx < max_steps:
+        action = model(torch.Tensor(obs).unsqueeze(0).to(device)).max(-1)[-1].item()
+        obs, r, done, _ = env.step(action)
+        reward += r
+        frames.append(env.frame)
+
+    return reward, np.stack(frames, 0)
+
 
 if __name__ == '__main__':
     #main(True, "/home/karol/Dokumenty/Magisterka badania/cartpole_test/trained_models/trained.pth")
