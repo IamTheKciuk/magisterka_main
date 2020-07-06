@@ -21,7 +21,7 @@ class FrameStackingAndResizingEnv:
         self.w = w
         self.h = h
 
-        self.buffer = np.zeros((h, w, num_stack), 'uint8')
+        self.buffer = np.zeros((num_stack, h, w), 'uint8')
 
     #przygotowanie klatki -> zmiana rozmiaru i kolorow
     def _preprocess_frame(self, frame):
@@ -32,14 +32,22 @@ class FrameStackingAndResizingEnv:
     def step(self, action):
         im, reward, done, info = self.env.step(action)
         im = self._preprocess_frame(im)
-        self.buffer[:, :, 1:self.n] = self.buffer[:, :, 0:self.n-1]
-        self.buffer[:, :, 0] = im
+        self.buffer[1:self.n, :, :] = self.buffer[0:self.n-1, :, :]
+        self.buffer[0, :, :] = im
         return self.buffer.copy(), reward, done,  info
+
+    @property
+    def observation_space(self):
+        return np.zeros((self.n, self.h, self.w))
+
+    @property
+    def action_space(self):
+        return self.env.action_space
 
     def reset(self):
         im = self.env.reset()
         im = self._preprocess_frame(im)
-        self.buffer = np.dstack([im]*self.n)
+        self.buffer = np.stack([im]*self.n, 0)
         return self.buffer.copy()
 
     def render(self, mode):
