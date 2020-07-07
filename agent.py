@@ -69,8 +69,9 @@ def main(name, test = False, chkpt = None, device = 'cpu'):
     if not test:
         wandb.init(project='dqn-tutorial', name=name)
 
-    memory_size = 100000 # pamięć gry
-    min_rb_size = 20000
+    #do_boltzman_exploration = True
+    memory_size = 100000 # pamięć gry, ilosc zapisywanych obserwacji
+    min_rb_size = 20000 # minimalna ilosc wpisow w Sarsd do samplowania
     sample_size = 128 #batch size <----
     lr = 0.0001
 
@@ -78,7 +79,9 @@ def main(name, test = False, chkpt = None, device = 'cpu'):
     eps_decay = 0.999999
 
     env_steps_before_train = 16 # srodowisko wykonuje tyle stepów przed trenowaniem
-    tgt_model_update =20
+    tgt_model_update = 50 # epochs before target model update
+    epochs_before_test = 500 # epochs before testing model
+
 
     env = gym.make("Breakout-v0")
     env = FrameStackingAndResizingEnv(env, 84, 84, 4)
@@ -94,9 +97,10 @@ def main(name, test = False, chkpt = None, device = 'cpu'):
     tgt = ConvModel(env.observation_space.shape, env.action_space.n).to(device) # stworzenie modelu sieci docelowej
     update_tgt_model(m, tgt)
 
-    rb = ReplayBuffer()
+    rb = ReplayBuffer(memory_size)
     steps_since_train = 0
     epochs_since_tgt = 0
+    epochs_since_test = 0
 
     step_num = -1 * min_rb_size
 
@@ -115,7 +119,7 @@ def main(name, test = False, chkpt = None, device = 'cpu'):
                 eps = 0
 
             if random() < eps:
-                action = env.action_space.sample()
+                action = (env.action_space.sample())
             else:
                 action = m(torch.Tensor(last_observation).unsqueeze(0).to(device)).max(-1)[-1].item()
 
@@ -141,13 +145,18 @@ def main(name, test = False, chkpt = None, device = 'cpu'):
                 episode_rewards = []
                 #print(step_num, loss.detach().item())
                 epochs_since_tgt += 1
+                epochs_since_test += 1
+
+                if epochs_since_test > epochs_before_test:
+                    rew, frames = run_test_episode(m, test_env, device)
+                    wandb.log({'test_reward': rew, f'test_video{step_num}': wandb.Video(frames.transpose(0, 3, 1, 2), str(rew), fps=25)})
+                    epochs_since_test = 0
+
                 if epochs_since_tgt > tgt_model_update:
                     print('updating tgt model')
                     update_tgt_model(m, tgt)
-                    rew, frames = run_test_episode(m, test_env, device)
-                    wandb.log({'test_reward': rew, 'test_video': wandb.Video(frames.transpose(0, 3, 2, 1), str(rew), fps=25)})
                     epochs_since_tgt = 0
-                    torch.save(tgt.state_dict(), f"/home/karol/Dokumenty/Magisterka badania/cartpole_test/trained_models/{step_num}.pth")
+                    torch.save(tgt.state_dict(), f"/home/karol/Dokumenty/Magisterka badania/test_br/{step_num}.pth")
                 steps_since_train = 0
     except KeyboardInterrupt:
         pass
@@ -174,4 +183,4 @@ def run_test_episode(model, env, device,  max_steps=1000):
 
 if __name__ == '__main__':
     #main(True, "/home/karol/Dokumenty/Magisterka badania/cartpole_test/trained_models/trained.pth")
-    main("breakout_test")
+    main("breakout_test_first")
