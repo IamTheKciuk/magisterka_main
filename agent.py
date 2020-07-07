@@ -59,7 +59,7 @@ def train_step(model, state_transitions, tgt, num_actions, device, gamma=0.99):
 
 
     loss_fn = nn.SmoothL1Loss()
-    loss = loss_fn(torch.sum(qvals*one_hot_actions, -1), rewards + mask[:, 0] * qvals_next * gamma)
+    loss = loss_fn(torch.sum(qvals*one_hot_actions, -1), rewards.squeeze() + mask[:, 0] * qvals_next * gamma)
     #loss = ((rewards + mask[:, 0] * qvals_next * gamma - torch.sum(qvals*one_hot_actions, -1))**2).mean()
     loss.backward()
     model.opt.step()
@@ -69,17 +69,17 @@ def main(name, test = False, chkpt = None, device = 'cpu'):
     if not test:
         wandb.init(project='dqn-tutorial', name=name)
 
-    #do_boltzman_exploration = True
+    do_boltzman_exploration = True
     memory_size = 100000 # pamięć gry, ilosc zapisywanych obserwacji
     min_rb_size = 20000 # minimalna ilosc wpisow w Sarsd do samplowania
     sample_size = 128 #batch size <----
     lr = 0.0001
 
-    eps_min = 0.01
+    eps_min = 0.05
     eps_decay = 0.999999
 
     env_steps_before_train = 16 # srodowisko wykonuje tyle stepów przed trenowaniem
-    tgt_model_update = 50 # epochs before target model update
+    tgt_model_update = 1000 # epochs before target model update
     epochs_before_test = 500 # epochs before testing model
 
 
@@ -118,10 +118,14 @@ def main(name, test = False, chkpt = None, device = 'cpu'):
             if test:
                 eps = 0
 
-            if random() < eps:
-                action = (env.action_space.sample())
+            if do_boltzman_exploration:
+                logits = m(torch.Tensor(last_observation).unsqueeze(0).to(device))[0]
+                action = torch.distributions.Categorical(logits = logits).sample().item()
             else:
-                action = m(torch.Tensor(last_observation).unsqueeze(0).to(device)).max(-1)[-1].item()
+                if random() < eps:
+                    action = (env.action_space.sample())
+                else:
+                    action = m(torch.Tensor(last_observation).unsqueeze(0).to(device)).max(-1)[-1].item()
 
             observation, reward, done, info = env.step(action)
             rolling_reward += reward
@@ -149,7 +153,7 @@ def main(name, test = False, chkpt = None, device = 'cpu'):
 
                 if epochs_since_test > epochs_before_test:
                     rew, frames = run_test_episode(m, test_env, device)
-                    wandb.log({'test_reward': rew, f'test_video{step_num}': wandb.Video(frames.transpose(0, 3, 1, 2), str(rew), fps=25)})
+                    wandb.log({'test_reward': rew, f'test_video{step_num}': wandb.Video(frames.transpose(0, 3, 1, 2), str(rew), fps=25, format='mp4')})
                     epochs_since_test = 0
 
                 if epochs_since_tgt > tgt_model_update:
@@ -177,6 +181,7 @@ def run_test_episode(model, env, device,  max_steps=1000):
         obs, r, done, _ = env.step(action)
         reward += r
         frames.append(env.frame)
+        idx += 1
 
     return reward, np.stack(frames, 0)
 
